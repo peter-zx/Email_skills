@@ -1,161 +1,107 @@
-# Agent-driven invoice email workflow
+# Agent 工作流
 
-This project is not meant to be a brittle crawler. It is a small toolset that gives an agent reliable evidence and repeatable actions for invoice-email work.
+这个项目不是让用户手动点脚本，而是给 Agent 一组可靠工具。Agent 负责理解用户目标、配置本地环境、运行流水线、检查结果、解释异常。
 
-## Goal
+## 1. 开始前
 
-Use lightweight Node.js tools for deterministic work:
+先向用户说明风险：
 
-- IMAP scanning and UID tracking.
-- Attachment download.
-- Link following and platform-specific invoice download.
-- PDF text extraction.
-- Excel ledger and archive generation.
+- 会读取指定日期范围内的邮箱标题、正文摘要、链接和附件。
+- 授权码只保存到本地 `.env`，不提交 Git，不在回复里展示。
+- 台账是辅助结果，需要用户复核。
+- 只处理发票邮件，不处理无关邮件。
 
-Use the agent or LLM for judgment:
+收集信息：
 
-- Decide whether a message is invoice-related when subject/body are ambiguous.
-- Interpret unusual email wording or partially structured body text.
-- Decide whether a failed link is a new platform type, expired link, QR-code/image flow, or manual-only case.
-- Summarize manual tasks clearly for the user.
+- 邮箱地址
+- 邮箱授权码
+- 日期范围
+- IMAP 主机、端口，默认 `imap.qq.com:993`
+- `MAIL_WEB_USER`，QQ 邮箱通常填 QQ 号
 
-## Processing contract
+## 2. 初始化
 
-Every invoice candidate should end in exactly one of these states:
+如果用户在对话中给了账号信息，直接写入本地 `.env`。不要回显授权码。
 
-- `auto-pdf`: PDF attachment or downloaded PDF was extracted and archived.
-- `auto-link-pdf`: no attachment, but a link resolver downloaded a PDF.
-- `auto-image-anomaly`: image/PNG invoice source was preserved and marked for OCR/manual review.
-- `manual-link`: link exists, but current resolvers cannot download the PDF.
-- `manual-body`: invoice-like email exists, but the body/links/files are insufficient.
-- `error`: IMAP or parsing failed; rerun or inspect manually.
+如果用户希望自己输入，运行：
 
-The agent should treat missing records as a bug. A hard-to-process email is still a record and must appear in `manual-tasks-*.csv` and `archive/index.html`.
-
-## Current source types
-
-1. Direct PDF attachment
-   - Deterministic.
-   - Download attachment by UID.
-   - Extract PDF fields.
-   - Archive as PDF.
-
-2. PDF plus OFD attachment
-   - Prefer PDF for ledger and archive.
-   - Keep OFD in download cache only.
-   - Do not show OFD duplicates in `archive/index.html`.
-
-3. Direct PDF/OFD link
-   - Follow redirects.
-   - If response is PDF/OFD, save it.
-   - Mark resolver as `direct-pdf` or `direct-ofd`.
-
-4. HTML landing page with visible download link
-   - Fetch landing page.
-   - Discover PDF/OFD links from `href`, `src`, and download-like URLs.
-   - Mark resolver as `html-link-discovery`.
-
-5. Platform API landing page
-   - Example: Nuonuo/JSS `nnfp.jss.com.cn`.
-   - Follow short link to landing URL.
-   - Call the same JSON endpoint used by the front-end.
-   - Download `invoiceSimpleVo.url` as PDF.
-   - Mark resolver as `nuonuo-api`.
-
-6. QR-code or image-only flow
-   - Preserve the image source.
-   - Mark `png_anomaly` or `link_anomaly`.
-   - Show the original email subject and copy/search action in HTML.
-
-## Agent loop
-
-1. Ask for scope: date range and mailbox profile.
-2. Run `npm run doctor` and `npm run check`.
-3. Run the pipeline, or run individual stages:
-   - `step1-email-scan.js`
-   - `step2-classify-invoices.js`
-   - `step2-download-pdf.js`
-   - `step3-extract-pdf.js`
-   - `step4-merge-data.js`
-   - `step5-generate-ledger.js`
-   - `archive-invoices.js`
-4. Inspect `classified/classified-{dateTag}.json` before download when debugging:
-   - attachment PDF
-   - PDF plus OFD
-   - direct PDF link
-   - platform landing page
-   - QR/image link
-   - manual/unknown
-5. Inspect summary numbers:
-   - scanned invoice candidates
-   - classified source types
-   - downloaded PDFs
-   - link resolver successes/failures
-   - complete records
-   - manual tasks
-6. If manual tasks exist, group them by reason:
-   - expired/protected link
-   - QR/image flow
-   - no body extracted
-   - missing amount/buyer/seller
-   - parser error
-7. For each new repeated manual pattern, add or improve a resolver.
-8. Rerun only the necessary stages.
-9. Report what was automatic, what is manual, and where the files are.
-
-## Staging contract
-
-All downloaded source files must first land in:
-
-```text
-scan-results/staging/{dateTag}/
-  pdfs/
-  ofds/
-  images/
-  failed/
+```bash
+npm install
+npm run setup
 ```
 
-PDF extraction reads from `staging/{dateTag}/pdfs`. The archive step copies final PDFs from staging into the human-facing `archive/` tree. `archive/` is a deliverable folder, not a processing workspace.
+然后检查环境：
 
-## Resolver design
+```bash
+npm run doctor
+npm run check
+```
 
-Link resolvers should be generalized by platform or behavior, not by single email.
+## 3. 运行
 
-Each resolver should answer:
+完整执行：
 
-- Can this resolver handle the final URL or HTML?
-- What evidence did it use?
-- What file did it download?
-- What resolver name should be recorded?
-- If it failed, is the failure retryable or manual?
+```bash
+npm run run -- 2026-06-15 2026-06-22
+```
 
-Current resolver names:
+流水线：
 
-- `direct-pdf`
-- `direct-ofd`
-- `html-link-discovery`
-- `nuonuo-api`
-- `unknown-link-resolver`
+1. 扫描发票候选邮件。
+2. 分类附件、链接、平台页、图片/二维码、人工项。
+3. 下载源文件到中转目录。
+4. 从 PDF 识别发票字段。
+5. 按 UID 合并邮件和 PDF 数据。
+6. 生成 Excel 台账。
+7. 归档 PDF 并生成 HTML 汇总页。
 
-When adding a new resolver, preserve the raw source link, final URL, resolver name, and error message in `download-results-*.json`.
+## 4. 检查结果
 
-## Manual handoff quality
+运行后必须检查：
 
-Manual records must be useful without reading raw JSON:
+- 发票候选邮件数量。
+- 下载成功数量。
+- PDF 识别数量。
+- 完整记录数量。
+- 人工任务数量。
+- `archive/index.html` 是否可打开。
 
-- email UID
-- email subject
-- email date
-- sender
-- known buyer/seller/amount/invoice number/date
-- original link(s)
-- failure reason
-- recommended action
+重点文件：
 
-The HTML summary should show PDF records by default and isolate anomalies in a separate tab.
+- `archive/index.html`
+- `scan-results/发票台账-{dateTag}.xlsx`
+- `scan-results/manual-tasks-{dateTag}.csv`
+- `scan-results/invoice-final-{dateTag}.json`
 
-## Safety boundary
+## 5. 人工任务
 
-This skill is limited to invoice email processing. The agent must not use it for general mailbox reading, personal correspondence, marketing analysis, or unrelated searches.
+任何无法自动处理的邮件都不能静默跳过，必须进入人工任务或异常项。
 
-Credentials must stay local in `.env` or `config/IMAP_CREDENTIALS.js`.
+常见原因：
+
+- 链接过期。
+- 链接需要扫码。
+- 平台防盗链。
+- PDF 无法解析。
+- 缺少购买方、销售方或金额。
+
+向用户汇报时，说明 UID、邮件标题、已知字段、失败原因和建议动作。
+
+## 6. 扩展原则
+
+不要只为某一封邮件写特例。重复出现的失败模式应抽象成新的链接解析类型或字段识别规则。
+
+最终数据可信顺序：
+
+```text
+PDF 发票正文 > PDF 文件名 > 邮件正文 > 邮件标题 > 发件人/映射推断
+```
+
+提交代码前确认这些内容没有进入 Git：
+
+- `.env`
+- `config/IMAP_CREDENTIALS.js`
+- `config/mailboxes.json`
+- `scan-results/`
+- `archive/`
+- 邮箱授权码

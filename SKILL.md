@@ -1,129 +1,121 @@
 ---
 name: email-invoice-pipeline
-description: Process invoice-related emails from an IMAP mailbox, download invoice attachments or invoice links, extract PDF invoice fields, merge records by QQ mailbox UID, generate manual review tasks, create Excel invoice ledgers, and archive source invoice files. Use when the user asks in English or Chinese to check mailbox invoices, scan recent invoice emails, download invoice files, process 发票/电子发票/数电发票/报销票据 from email, create 发票台账, or handle 最近7天/本月/指定日期范围的邮箱发票. Use only for invoice email discovery, invoice attachment download, invoice PDF extraction, invoice ledger generation, link-invoice handling, PNG invoice anomaly handling, and invoice archiving workflows; do not use this skill for unrelated email reading, general mailbox analysis, personal correspondence, marketing emails, or non-invoice tasks.
+description: Use this skill only for invoice email workflows: scanning IMAP/QQ mailbox invoice emails, downloading invoice PDF/OFD attachments or invoice links, extracting 发票/电子发票/数电发票 PDF fields, generating 发票台账/Excel ledgers, producing manual review tasks, and archiving invoice PDFs. Trigger when the user asks to check recent invoice emails, download invoices from email, 整理邮箱发票, 生成发票台账, 处理最近7天/本月/指定日期范围的发票邮件, or let an agent manage invoice email files. Do not use for unrelated mailbox reading, personal correspondence, marketing emails, or general email analysis.
 ---
 
-# Email Invoice Pipeline
+# 邮箱发票整理 Skill
 
-Use this skill only for invoice-related email processing. If the user asks for unrelated mailbox work, decline and explain that this skill is limited to invoice emails and invoice-ledger workflows.
+只处理发票邮件。遇到普通邮件读取、私人邮件总结、营销邮件分析等请求时，直接说明本 skill 只服务发票下载、识别、台账和归档。
 
-## Required First Message
+## 首次风险提示
 
-Before live mailbox access, clearly tell the user:
+在访问真实邮箱前，先用简短中文告诉用户：
 
-- The agent will access mailbox metadata, subjects, message bodies, links, and attachments within the requested date range.
-- Email credentials or app passwords are sensitive. Prefer mailbox app passwords / authorization codes and revoke them after use if needed.
-- AI extraction can be wrong. The generated ledger is an assistance artifact, not accounting, tax, legal, or audit advice.
-- The user must review high-value invoices, manual tasks, missing fields, and any records marked `needsManualReview`.
-- The agent should only process invoice-related messages and should not inspect unrelated emails beyond what is technically needed for filtering.
+- 会读取指定日期范围内的邮箱标题、发件人、正文摘要、链接和附件。
+- 邮箱授权码/应用密码很敏感，只保存到本地 `.env`，不提交 Git，不在回复里展示。
+- PDF 解析和链接下载可能出错，台账只是辅助材料，不是财务、税务、审计结论。
+- 高金额、异常项、人工任务必须由用户复核。
+- 本次只处理发票相关邮件，不处理无关邮箱内容。
 
-Continue only after the user authorizes the mailbox run and provides or confirms local credential configuration.
+获得用户授权和必要账号信息后再继续。
 
-## Setup
+## 对话式初始化
 
-After cloning the repository:
+如果用户在对话里直接提供邮箱信息，Agent 可以代替用户初始化本地 `.env`。需要收集：
+
+```text
+邮箱地址：例如 your@qq.com
+邮箱授权码：QQ 邮箱 IMAP/SMTP 授权码，不是网页登录密码
+IMAP 主机：默认 imap.qq.com
+IMAP 端口：默认 993
+是否 TLS：默认 true
+邮箱网页用户标识：QQ 邮箱通常填 QQ 号，用于生成邮件跳转链接
+处理日期范围：例如 最近7天 / 2026-06-15 到 2026-06-22
+```
+
+写入 `.env` 时只在本机操作，不在回复中回显授权码。模板：
+
+```env
+IMAP_USER=用户邮箱
+IMAP_PASSWORD=用户授权码
+IMAP_HOST=imap.qq.com
+IMAP_PORT=993
+IMAP_TLS=true
+IMAP_REJECT_UNAUTHORIZED=false
+MAILBOX=INBOX
+MAIL_WEB_USER=QQ号或邮箱前缀
+```
+
+如果用户不想在对话里给凭证，让用户运行：
 
 ```bash
 npm install
 npm run setup
 ```
 
-`npm run setup` lets the user choose or enter a mailbox profile. It writes credentials only to local `.env`, which must remain git-ignored.
+## 标准使用流程
 
-Preferred project-specific credential file:
-
-```bash
-copy config/IMAP_CREDENTIALS.example.js config/IMAP_CREDENTIALS.js
-```
-
-Edit `config/IMAP_CREDENTIALS.js` locally. This file is git-ignored and must not be committed.
-
-Run:
+克隆项目后执行：
 
 ```bash
+npm install
 npm run doctor
 npm run check
+npm run run -- 2026-06-15 2026-06-22
 ```
 
-## Core Pipeline
+日期范围按用户要求替换。`run-all.js` 会依次执行：
 
-Run the 7-step pipeline:
+1. `step1-email-scan.js`：扫描发票候选邮件。
+2. `step2-classify-invoices.js`：分类附件、链接、平台页、图片/二维码、人工项。
+3. `step2-download-pdf.js`：下载源文件到 `scan-results/staging/{dateTag}/`。
+4. `step3-extract-pdf.js`：从 PDF 提取购买方、销售方、金额、发票号、开票日期。
+5. `step4-merge-data.js`：按邮件 UID 合并邮件、下载和 PDF 识别结果。
+6. `step5-generate-ledger.js`：生成 Excel 台账。
+7. `archive-invoices.js`：按规则归档 PDF 并生成 `archive/index.html`。
 
-```bash
-npm run run -- 2026-06-01 2026-06-18
+## 数据可信优先级
+
+最终台账和归档必须以 PDF 发票正文为准：
+
+```text
+PDF 发票正文 > PDF 文件名 > 邮件正文 > 邮件标题 > 发件人/映射推断
 ```
 
-The pipeline steps are:
+邮件正文只是初筛、链接发现和缺失字段补充来源，不能覆盖 PDF 中识别出的购买方、销售方、金额、发票号和开票日期。
 
-1. `step1-email-scan.js`: scan QQ mailbox by date range and cache invoice email metadata.
-2. `step2-classify-invoices.js`: classify invoice candidates into attachment, link, platform, QR/image, and manual buckets.
-3. `step2-download-pdf.js`: execute the classification plan and download source files into `scan-results/staging/{dateTag}/`.
-4. `step3-extract-pdf.js`: parse staged PDFs with `pdf2json` and extract buyer, seller, amount, invoice number, and invoice date.
-5. `step4-merge-data.js`: merge email metadata, classification, download results, and PDF extraction by UID.
-6. `step5-generate-ledger.js`: generate Excel ledger with 4 sheets.
-7. `archive-invoices.js`: archive final PDFs and generate `archive/index.html`.
+## 交付物
 
-## Archive
+完成后重点交付：
 
-After the core pipeline, archive source files:
+- `archive/index.html`：汇总预览。
+- `archive/`：按购买方、销售方归档的 PDF。
+- `scan-results/发票台账-{dateTag}.xlsx`：Excel 台账。
+- `scan-results/manual-tasks-{dateTag}.csv`：人工任务，没有任务时也应存在表头。
+- `scan-results/invoice-final-{dateTag}.json`：最终结构化数据。
 
-```bash
-npm run archive -- 20260601-20260618
+收纳规则：
+
+```text
+archive/{购买方}/{销售方}/{金额}_{购买方关键字}_{发票号后6位}_{类型}_{月份}.pdf
 ```
 
-Archive rules:
+## Agent 复核规则
 
-- Normal PDF/OFD: `archive/{buyer}/{seller}/{amount}_{buyerKeyword}_{invoiceNoLast6}_{type}_{month}.{ext}`
-- PNG/image invoice: `archive/待处理/美团/`
-- Summary: `archive/index.html` with a top summary area and three tabs: buyer grouping, email-time ordering, anomalies.
+每次运行后检查：
 
-## Outputs
+- 发票候选数、分类数、下载成功数、PDF 识别数、最终完整记录数是否一致。
+- `manual-tasks-*.csv` 是否为空；不为空时向用户说明原因和处理建议。
+- `archive/index.html` 是否只展示 PDF，OFD 不重复展示。
+- 同类下载失败是否应抽象成新的链接解析器，而不是只修单封邮件。
 
-Look under `scan-results/`:
+禁止提交或输出：
 
-- `emails/emails-{dateTag}.json`: invoice-candidate emails.
-- `classified/classified-{dateTag}.json`: classification plan for every invoice candidate.
-- `staging/{dateTag}/pdfs`: centralized downloaded PDF source files.
-- `staging/{dateTag}/ofds`: OFD source files kept for traceability.
-- `staging/{dateTag}/images`: image/QR-code source files kept for manual/OCR handling.
-- `downloads/download-results-{dateTag}.json`: downloaded PDF/OFD/image/link results.
-- `pdf-text-{dateTag}.json`: extracted PDF text and fields.
-- `invoice-final-{dateTag}.json`: merged invoice records.
-- `manual-tasks-{dateTag}.csv`: rows requiring human review.
-- `发票台账-{dateTag}.xlsx`: Excel ledger.
+- `.env`
+- `config/IMAP_CREDENTIALS.js`
+- `config/mailboxes.json`
+- `scan-results/`
+- `archive/`
+- 邮箱授权码、真实密码、用户发票源文件
 
-Archive outputs:
-
-- `archive/`: classified source invoice files.
-- `archive/manifest.json`: archive manifest.
-- `archive/index.html`: clickable summary with anomalies and mail links.
-
-## Operating Rules For Agents
-
-- Keep all credentials in `.env` or `config/IMAP_CREDENTIALS.js`; never commit these files or paste secrets into output.
-- Process the smallest date range that satisfies the task.
-- Prefer `npm run doctor` before live runs.
-- If live mailbox access fails, report the precise failing stage and stop.
-- Treat `manual-tasks-*.csv` and archive anomalies as required human review, not a failure.
-- Do not expand scope from invoice emails to general mailbox search.
-
-## Agent Judgment Loop
-
-This skill should be used as an agent-operated toolset, not as a fixed crawler.
-
-The scripts perform deterministic work: scan, download, parse, merge, archive, and generate ledgers. The agent is responsible for judgment:
-
-- Check whether every invoice-like email became either an archived PDF record or a manual task.
-- Inspect repeated manual failures and decide whether they represent a new source type.
-- Add or improve a link resolver only when a pattern is repeated or clearly platform-specific.
-- Never silently drop a hard email; preserve it as a manual task with UID, subject, date, links, known fields, and failure reason.
-
-Current link resolver categories:
-
-- `direct-pdf`: URL or redirect returns a PDF.
-- `direct-ofd`: URL or redirect returns an OFD.
-- `html-link-discovery`: landing page contains a PDF/OFD link.
-- `nuonuo-api`: Nuonuo/JSS invoice landing page requires calling the front-end JSON API.
-- `unknown-link-resolver`: downloaded by a resolver that has not identified itself.
-
-For the full business workflow and extension rules, read `docs/AGENT_WORKFLOW.md`.
+更多流程细节可按需读取 `docs/AGENT_WORKFLOW.md` 和 `docs/PROJECT_DESIGN.md`。

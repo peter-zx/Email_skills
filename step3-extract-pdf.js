@@ -314,6 +314,21 @@ function cleanCompanyName(name) {
   return n;
 }
 
+function saveExtractionResults(outputFile, dateTagFromDl, results) {
+  const output = {
+    meta: {
+      dateTag: dateTagFromDl,
+      total: results.length,
+      success: results.filter(r => !r.error).length,
+      fail: results.filter(r => r.error).length,
+      extractedAt: new Date().toISOString(),
+    },
+    results,
+  };
+  fs.writeFileSync(outputFile, JSON.stringify(output, null, 2), 'utf8');
+  return output;
+}
+
 // ===== 主函数 =====
 async function extractPdfs() {
   const pdfFiles = findPdfs();
@@ -328,14 +343,22 @@ async function extractPdfs() {
   let results = [];
   if (fs.existsSync(outputFile)) {
     results = JSON.parse(fs.readFileSync(outputFile, 'utf8')).results || [];
-    console.log('已有提取结果: ' + results.length + ' 条');
   }
+
+  const currentPdfPaths = new Set(pdfFiles.map(f => path.resolve(f.filepath)));
+  const currentPdfNames = new Set(pdfFiles.map(f => f.filename));
+  results = results.filter(r => {
+    const resultPath = r.filepath ? path.resolve(r.filepath) : null;
+    return (resultPath && currentPdfPaths.has(resultPath)) || currentPdfNames.has(r.filename);
+  });
+  if (results.length) console.log('已有提取结果: ' + results.length + ' 条');
 
   const extractedFnames = new Set(results.map(r => r.filename));
   const toExtract = pdfFiles.filter(f => !extractedFnames.has(f.filename));
   console.log('本次需提取: ' + toExtract.length + ' 个');
 
   if (toExtract.length === 0) {
+    saveExtractionResults(outputFile, dateTagFromDl, results);
     console.log('✅ 全部已提取，跳过');
     return results;
   }
@@ -390,18 +413,7 @@ async function extractPdfs() {
   }
 
   // 保存
-  const output = {
-    meta: {
-      dateTag: dateTagFromDl,
-      total: results.length,
-      success: results.filter(r => !r.error).length,
-      fail: results.filter(r => r.error).length,
-      extractedAt: new Date().toISOString(),
-    },
-    results,
-  };
-
-  fs.writeFileSync(outputFile, JSON.stringify(output, null, 2), 'utf8');
+  const output = saveExtractionResults(outputFile, dateTagFromDl, results);
 
   // 统计
   const byType = {};

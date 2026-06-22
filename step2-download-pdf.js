@@ -354,6 +354,7 @@ function guessInvoiceNoFromFilename(filename) {
 }
 
 async function main() {
+  if (fs.existsSync(STAGING_DIR)) fs.rmSync(STAGING_DIR, { recursive: true, force: true });
   if (!fs.existsSync(DOWNLOADS_DIR)) fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
   if (!fs.existsSync(PDF_DIR)) fs.mkdirSync(PDF_DIR, { recursive: true });
   if (!fs.existsSync(OFD_DIR)) fs.mkdirSync(OFD_DIR, { recursive: true });

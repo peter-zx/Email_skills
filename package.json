@@ -1,8 +1,8 @@
 {
-  "name": "finance-scripts",
-  "version": "1.0.0",
-  "description": "",
-  "main": "download-attachments.js",
+  "name": "email-invoice-skill",
+  "version": "0.3.2",
+  "description": "Agent-friendly IMAP invoice email pipeline for downloading, extracting, ledgering, and archiving invoice PDFs.",
+  "main": "run-all.js",
   "scripts": {
     "setup": "node scripts/configure-mailbox.js",
     "doctor": "node scripts/doctor.js",
@@ -16,7 +16,13 @@
     "run": "node run-all.js",
     "test": "npm run check"
   },
-  "keywords": [],
+  "keywords": [
+    "invoice",
+    "email",
+    "imap",
+    "codex-skill",
+    "发票"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
