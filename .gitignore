@@ -1,0 +1,34 @@
+# 运行时产物
+scan-results/emails/
+scan-results/downloads/
+scan-results/pdf-text-*.json
+scan-results/link-invoice-results.json
+scan-results/
+
+# 旧管线数据
+/downloads/
+/downloads_raw/
+
+# 归档输出
+archive/
+
+# Node
+node_modules/
+package-lock.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# 环境配置
+.env
+.env.production
+config/mailboxes.json
+config/IMAP_CREDENTIALS.js
+
+# 日志
+*.log
