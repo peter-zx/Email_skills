@@ -1,88 +1,149 @@
-# Email Invoice Pipeline
+# 邮箱发票整理 Skill
 
-Agent-friendly QQ/IMAP invoice email processor.
+这是一个给 Agent 使用的轻量化发票邮件处理工具。目标是让用户把项目克隆到本地后，用自然语言让 Codex、Claude Code 等 Agent 完成“扫描邮箱、下载发票、识别 PDF、生成台账、按规则归档”的工作。
 
-This project provides lightweight Node.js tools for an AI agent to manage invoice-related emails only: scan invoice candidates, classify source types, download invoice files, extract PDF fields, generate an Excel ledger, and archive PDFs by buyer and seller.
+本项目默认只处理“发票邮件”相关任务。它不应该被用来读取、总结或分析普通邮件。
 
-## Safety Notice
+## 风险提示
 
-This tool reads mailbox metadata, subjects, invoice-related message bodies, links, and attachments in the requested date range. Use mailbox app passwords or authorization codes. Keep credentials local in `.env` or `config/IMAP_CREDENTIALS.js`; never commit them.
+首次使用前请务必知道：
 
-AI and PDF extraction can be wrong. Generated ledgers are assistance artifacts, not accounting, tax, legal, or audit advice. Review high-value invoices and any manual/anomaly records.
+- 本工具会读取指定日期范围内的邮箱标题、发件人、正文摘要、链接和附件。
+- 请使用邮箱授权码或应用专用密码，不要使用网页登录密码。
+- 凭证只应保存在本地 `.env` 或被忽略的 `config/IMAP_CREDENTIALS.js` 中，不要提交到 Git。
+- PDF 解析、链接下载、AI 判断都可能出错，生成的台账只能作为辅助材料。
+- 涉及报销、财务、税务、审计的正式结论，仍需要人工复核。
 
-The skill is limited to invoice email workflows. It should not be used for general mailbox reading.
-
-## Quick Start
+## 快速开始
 
 ```bash
 npm install
 npm run setup
 npm run doctor
 npm run check
-npm run run -- 2026-06-16 2026-06-22
+npm run run -- 2026-06-15 2026-06-22
 ```
 
-Outputs:
-
-- `scan-results/classified/classified-{dateTag}.json`
-- `scan-results/staging/{dateTag}/pdfs`
-- `scan-results/downloads/download-results-{dateTag}.json`
-- `scan-results/pdf-text-{dateTag}.json`
-- `scan-results/invoice-final-{dateTag}.json`
-- `scan-results/发票台账-{dateTag}.xlsx`
-- `archive/index.html`
-
-## Pipeline
-
-1. `step1-email-scan.js`
-   Scan the mailbox and cache invoice candidate emails by UID.
-
-2. `step2-classify-invoices.js`
-   Classify every candidate before downloading:
-   `attachment_pdf`, `attachment_pdf_ofd`, `link_direct_pdf`, `link_platform_page`, `attachment_image`, `manual_body`, etc.
-
-3. `step2-download-pdf.js`
-   Execute the classification plan and download source files into:
-   `scan-results/staging/{dateTag}/pdfs|ofds|images|failed`.
-
-4. `step3-extract-pdf.js`
-   Extract buyer, seller, amount, invoice number, date, and tax amount from staged PDFs.
-
-5. `step4-merge-data.js`
-   Merge email metadata, classification, download evidence, and PDF extraction by UID.
-
-6. `step5-generate-ledger.js`
-   Generate the Excel ledger.
-
-7. `archive-invoices.js`
-   Archive final PDFs and generate `archive/index.html`.
-
-## Supported Source Types
-
-- PDF attachments.
-- PDF plus OFD attachments, with PDF preferred for ledger/archive.
-- Direct PDF links.
-- Tax bureau/Baiwang links such as `Wjgs=PDF`.
-- Nuonuo/JSS platform links via front-end JSON API.
-- Generic HTML pages containing PDF/OFD download links.
-- Image/QR-code flows as manual/anomaly records.
-
-## Archive Rule
+常用自然语言示例：
 
 ```text
-archive/{buyer}/{seller}/{amount}_{buyerKeyword}_{invoiceNoLast6}_{type}_{month}.pdf
+请克隆这个项目，检查我最近 7 天的发票邮件，下载发票，识别金额和购销方，生成台账并按规则归档。
 ```
 
-OFD files are retained in staging for traceability but do not appear in the PDF archive/index.
+## 配置邮箱
 
-## Agent Contract
+推荐执行：
 
-Every invoice candidate must become one of:
+```bash
+npm run setup
+```
 
-- archived PDF record
-- saved anomaly/manual record
-- explicit error with reason
+它会引导你在终端里输入邮箱、IMAP 服务器、授权码等信息。真实凭证不会进入仓库。
 
-The agent should inspect `classified-*.json`, `download-results-*.json`, and `manual-tasks-*.csv` after each run. Repeated manual failures should become new resolvers, not silent misses.
+也可以手动复制 `.env.example` 为 `.env` 后填写：
 
-See [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md) and [docs/PROJECT_DESIGN.md](docs/PROJECT_DESIGN.md).
+```env
+IMAP_USER=your@qq.com
+IMAP_PASSWORD=your_email_app_password
+IMAP_HOST=imap.qq.com
+IMAP_PORT=993
+IMAP_TLS=true
+MAIL_WEB_USER=your_qq_number
+```
+
+## 处理流程
+
+完整流水线分 7 步：
+
+1. `step1-email-scan.js`
+   登录 IMAP 邮箱，扫描指定日期范围，找出发票候选邮件，缓存邮件元数据。
+
+2. `step2-classify-invoices.js`
+   根据上一步清单分类：附件 PDF、PDF+OFD、直链 PDF、平台跳转链接、图片/二维码、需要人工处理等。
+
+3. `step2-download-pdf.js`
+   按分类结果下载源文件，统一放到中转目录：
+   `scan-results/staging/{dateTag}/pdfs|ofds|images|failed`
+
+4. `step3-extract-pdf.js`
+   从中转目录的 PDF 中提取真实发票信息：购买方、销售方、价税合计、发票号码、开票日期、税额。
+
+5. `step4-merge-data.js`
+   按 IMAP UID 合并邮件、分类、下载记录和 PDF 识别结果。
+
+6. `step5-generate-ledger.js`
+   生成 Excel 台账。
+
+7. `archive-invoices.js`
+   只归档 PDF，生成 `archive/index.html` 汇总预览。
+
+## 数据优先级
+
+最终台账和归档必须以 PDF 发票正文为最高可信来源：
+
+```text
+PDF 发票正文 > PDF 文件名 > 邮件正文 > 邮件标题 > 发件人/销售方映射推断
+```
+
+购买方、销售方、金额、发票号码、开票日期，只要 PDF 能识别出来，就应使用 PDF 结果。邮件正文只作为初筛和下载链接解析线索，不能覆盖 PDF 中的真实发票信息。
+
+如果 PDF 无法解析，才允许使用邮件正文、标题、发件人、配置映射做补充，并在人工任务里说明来源和风险。
+
+## 支持的邮件形态
+
+- 直接带 PDF 附件的发票邮件。
+- 同时带 PDF 和 OFD 的发票邮件，台账和归档优先使用 PDF。
+- 正文中含 PDF 直链的邮件。
+- 正文链接进入平台页面后，再解析 PDF 下载地址的邮件。
+- 图片、二维码、过期链接、防盗链等无法自动下载的邮件，会进入人工任务或异常清单。
+
+## 收纳规则
+
+归档目录：
+
+```text
+archive/{购买方}/{销售方}/{金额}_{购买方关键字}_{发票号后6位}_{类型}_{月份}.pdf
+```
+
+示例：
+
+```text
+archive/武汉市硚口区融爱日用品经营部（个体工商户）/武汉英格卡购物中心有限公司/334.02_融爱_855376_发票_202606.pdf
+```
+
+说明：
+
+- `购买方` 和 `销售方` 优先来自 PDF 发票正文。
+- `金额` 使用 PDF 中的价税合计。
+- `发票号后6位` 用于快速核对。
+- `月份` 来自开票日期，格式为 `YYYYMM`。
+- OFD 文件保留在中转目录用于追溯，但不进入 PDF 汇总页，避免重复。
+
+## 输出文件
+
+运行完成后重点看这些文件：
+
+- `archive/index.html`：归档汇总预览，支持按购买方分组、按邮件时间倒序、仅异常项。
+- `archive/manifest.json`：归档清单。
+- `scan-results/发票台账-{dateTag}.xlsx`：Excel 台账。
+- `scan-results/invoice-final-{dateTag}.json`：最终结构化数据。
+- `scan-results/invoice-final-{dateTag}.csv`：最终 CSV 明细。
+- `scan-results/manual-tasks-{dateTag}.csv`：需要人工介入的任务。
+- `scan-results/downloads/download-results-{dateTag}.json`：下载记录。
+- `scan-results/classified/classified-{dateTag}.json`：邮件分类记录。
+
+## Agent 使用约定
+
+Agent 运行时要遵守：
+
+- 只处理用户指定日期范围内的发票邮件。
+- 不回答、不整理、不输出与发票无关的邮箱内容。
+- 每封发票候选邮件必须有结果：已归档、需人工、异常、或明确失败原因。
+- 下载失败或解析失败不能静默跳过，必须进入 `manual-tasks` 或异常清单。
+- 如果同类失败重复出现，应把它总结为新的链接解析类型或人工处理类型。
+- 提交代码前必须确认 `.env`、真实邮箱凭证、发票源文件、扫描缓存、归档结果没有进入 Git。
+
+更多设计细节见：
+
+- `docs/AGENT_WORKFLOW.md`
+- `docs/PROJECT_DESIGN.md`

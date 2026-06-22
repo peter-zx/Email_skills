@@ -272,25 +272,18 @@ async function mergeData() {
 
       // 金额：PDF价税合计优先
       if (pdfRecord.amount) {
-        // 如果PDF金额和邮件金额不一致，优先用邮件金额（价税合计）
-        const emailAmt = record.amount;
-        if (!emailAmt) {
-          record.amount = pdfRecord.amount;
-          record.amountSource = 'pdf';
-        } else {
-          // 两者都有，取邮件金额（通常是价税合计，更完整）
-          record.amountSource = 'email-subject';
-        }
+        record.amount = pdfRecord.amount;
+        record.amountSource = 'pdf';
       }
 
       // 购买方/销售方
       if (pdfRecord.buyer) {
         record.buyer = cleanCompanyName(pdfRecord.buyer) || record.buyer;
-        if (!record.buyerSource) record.buyerSource = 'pdf';
+        record.buyerSource = 'pdf';
       }
       if (pdfRecord.seller) {
         record.seller = cleanCompanyName(pdfRecord.seller) || record.seller;
-        if (!record.sellerSource) record.sellerSource = 'pdf';
+        record.sellerSource = 'pdf';
       }
     }
 

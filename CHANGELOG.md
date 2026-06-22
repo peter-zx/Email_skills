@@ -1,62 +1,90 @@
-# Changelog
+# 版本说明
+
+## v0.3.1 - 2026-06-22
+
+### 修复
+
+- 修复部分数电发票 PDF 中“销售方信息”排在“购买方信息”前面时，购买方和销售方被反向识别的问题。
+- 修复合并阶段的数据优先级：PDF 发票正文识别出的购买方、销售方、金额必须覆盖邮件正文和邮件标题。
+- 修复 `buyerSource`、`sellerSource` 来源标记，PDF 覆盖后明确标记为 `pdf`，方便后续追溯。
+
+### 文档
+
+- README 改为默认中文。
+- 明确写入风险提示、数据优先级、收纳规则、Agent 使用约定。
+
+### 验证
+
+使用 `2026-06-15` 到 `2026-06-22` 的测试数据重跑：
+
+- 发票候选邮件：23 封
+- 成功识别 PDF：23 个
+- 完整记录：23 条
+- 人工任务：0 条
+- 已归档 PDF：23 个
+
+重点验证：
+
+- UID 5875：购买方为 `武汉市硚口区融爱日用品经营部（个体工商户）`，销售方为 `武汉京东德瑞贸易有限公司`。
+- UID 5876：购买方为 `武汉市硚口区融爱日用品经营部（个体工商户）`，销售方为 `武汉京东世纪贸易有限公司`。
 
 ## v0.3.0 - 2026-06-22
 
-### Added
+### 新增
 
-- Seven-stage agent workflow:
-  1. scan
-  2. classify
-  3. download to staging
-  4. extract PDF
-  5. merge
-  6. ledger
-  7. archive
-- `step2-classify-invoices.js` for source-type classification before download.
-- Central staging workspace:
-  `scan-results/staging/{dateTag}/pdfs|ofds|images|failed`.
-- Link resolver evidence fields in download/final records:
-  `sourceType`, `expectedAction`, `platform`, `resolver`.
-- Nuonuo/JSS resolver using `/scan2/getIvcDetailShow.do`.
-- Tax bureau/Baiwang direct PDF handling for `Wjgs=PDF` links, with curl fallback.
-- HTML body fallback in mailbox scanning.
-- Folded/RFC encoded-word subject decoding.
-- Empty `manual-tasks-*.csv` generation when there are no manual tasks.
-- Project documentation:
+- 七阶段 Agent 工作流：
+  1. 扫描邮件
+  2. 分类发票候选
+  3. 下载源文件到中转区
+  4. 提取 PDF 发票信息
+  5. 合并数据
+  6. 生成 Excel 台账
+  7. 归档 PDF 并生成 HTML 汇总页
+- 新增 `step2-classify-invoices.js`，下载前先判断发票来源类型。
+- 新增统一中转目录：
+  `scan-results/staging/{dateTag}/pdfs|ofds|images|failed`
+- 下载和最终记录中增加链路证据字段：
+  `sourceType`、`expectedAction`、`platform`、`resolver`
+- 新增诺诺/JSS 平台链接解析。
+- 新增百旺/税务局 `Wjgs=PDF` 直链处理和 curl 兜底下载。
+- 新增 HTML 正文兜底解析。
+- 新增 RFC 折行邮件标题解码。
+- 即使没有人工任务，也生成空的 `manual-tasks-*.csv`。
+- 新增项目文档：
   - `README.md`
   - `docs/AGENT_WORKFLOW.md`
   - `docs/PROJECT_DESIGN.md`
 
-### Changed
+### 调整
 
-- `run-all.js` now runs the full seven-stage workflow and includes archive generation.
-- PDF extraction reads staged PDFs first.
-- Archive output shows only PDFs; OFD files are retained in staging but excluded from `archive/index.html`.
-- Buyer normalization maps Rongai variants to `武汉市硚口区融爱日用品经营部（个体工商户）`.
-- Image attachments in emails that already have a successful PDF are not treated as anomalies.
+- `run-all.js` 改为完整七阶段编排，并包含归档步骤。
+- PDF 提取优先读取中转目录中的 PDF。
+- 归档和 HTML 汇总页只展示 PDF；OFD 保留在中转区用于追溯，不重复进入汇总页。
+- 购买方归一化：融爱相关简称统一为 `武汉市硚口区融爱日用品经营部（个体工商户）`。
+- 同一邮件已经成功下载 PDF 时，图片附件不再作为异常项重复展示。
 
-### Fixed
+### 修复
 
-- Fixed truncated folded email subjects, including forwarded Nuonuo messages.
-- Fixed HTML-only invoice emails where `parsed.text` was empty.
-- Fixed attachment emails previously marked as `error` when batch fetch missed body/attachments; scanner retries per UID.
-- Fixed Baiwang/tax-bureau direct PDF links appearing after QR-code image links.
-- Fixed Nuonuo platform links that require API resolution instead of simple HTML scraping.
+- 修复转发邮件、折行邮件标题被截断的问题。
+- 修复 HTML-only 邮件正文为空导致无法解析链接的问题。
+- 修复批量抓取遗漏正文或附件时，附件邮件被误判为 `error` 的问题，扫描阶段会按 UID 重试。
+- 修复百旺/税务局直链 PDF 被二维码图片链接干扰的问题。
+- 修复诺诺平台链接不能通过普通 HTML 抓取下载地址的问题。
 
-### Verification
+### 验证
 
-Tested with date range `2026-06-16` to `2026-06-22`:
+使用 `2026-06-16` 到 `2026-06-22` 的测试数据验证：
 
-- invoice candidates: 23
-- staged PDFs: 23
-- extracted PDFs: 23
-- complete final records: 23
-- manual tasks: 0
-- archived PDFs: 23
-- archive anomalies: 0
+- 发票候选邮件：23 封
+- 中转 PDF：23 个
+- PDF 识别：23 个
+- 完整最终记录：23 条
+- 人工任务：0 条
+- 已归档 PDF：23 个
+- 归档异常：0 条
 
-Specific regressions verified:
+重点验证：
 
-- UID 5845 Baiwang/tax-bureau link downloaded via `curl-direct-pdf`.
-- UID 5865 attachment PDF detected and processed.
-- UID 5866 forwarded Nuonuo subject decoded fully and resolved via `nuonuo-api`.
+- UID 5845：百旺/税务局链接通过 `curl-direct-pdf` 下载。
+- UID 5865：带附件 PDF 的邮件被正确识别和处理。
+- UID 5866：转发的诺诺邮件标题完整解码，并通过 `nuonuo-api` 解析下载。

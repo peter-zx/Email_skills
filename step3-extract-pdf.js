@@ -73,6 +73,27 @@ function companyMatches(text) {
   ))];
 }
 
+function assignPartiesByLabels(info, compact, companies) {
+  if (companies.length < 2) return;
+  const labelText = String(compact || '').replace(/\s+/g, '');
+  const buyerIndex = labelText.indexOf('购买方信息');
+  const sellerIndex = labelText.indexOf('销售方信息');
+
+  if (buyerIndex >= 0 && sellerIndex >= 0) {
+    if (sellerIndex < buyerIndex) {
+      info.seller = info.seller || companies[0];
+      info.buyer = info.buyer || companies[1];
+      return;
+    }
+    info.buyer = info.buyer || companies[0];
+    info.seller = info.seller || companies[1];
+    return;
+  }
+
+  info.buyer = info.buyer || companies[0];
+  info.seller = info.seller || companies[1];
+}
+
 function extractDigitalInvoice(t, filename) {
   const compact = t.replace(/\s+/g, ' ');
   const info = {
@@ -105,8 +126,8 @@ function extractDigitalInvoice(t, filename) {
   }
 
   const companies = companyMatches(compact);
-  if (companies.length >= 1) info.buyer = companies[0];
-  if (companies.length >= 2) info.seller = companies[1];
+  assignPartiesByLabels(info, compact, companies);
+  if (companies.length === 1) info.buyer = info.buyer || companies[0];
   info._extracted = '数电发票';
   return info;
 }
@@ -207,14 +228,14 @@ function extractSpacedDigital(t, filename) {
   const sellerMatch = raw.match(/销售方.*?名称[：:]*(?:名称[：:]*)?([\u4e00-\u9fa5A-Za-z0-9（）()公司企业店所部]{2,40})(?:\d{15,}|统一|名称|项目|规格)/);
   if (sellerMatch) info.seller = sellerMatch[1].trim();
 
-  // 如果空格格式找不到，尝试在全文搜索公司名
+  // 如果空格格式找不到，尝试按“购买方信息/销售方信息”的标签顺序判断。
+  // 有些数电票 PDF 抽取出来是“销售方信息 购买方信息 ... 销售方名称 购买方名称”，
+  // 不能简单认为第一个公司就是购买方。
   if (!info.buyer || !info.seller) {
     const companyMatches = t.match(/([一-龥]{4,30}(?:有限公司|个体工商户|经营部|服务中心|中心))/g) || [];
     const unique = [...new Set(companyMatches)];
     if (unique.length >= 2) {
-      // 第一个是购买方，第二个是销售方
-      if (!info.buyer) info.buyer = unique[0];
-      if (!info.seller) info.seller = unique[1];
+      assignPartiesByLabels(info, raw, unique);
     } else if (unique.length === 1) {
       if (!info.buyer) info.buyer = unique[0];
     }
