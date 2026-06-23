@@ -172,18 +172,18 @@ async function generateLedger() {
   s3.addRow(['需人工确认', meta.needsManual]);
   s3.addRow(['', '']);
   s3.addRow(['=== 金额汇总 ===', '']);
-  const rongAi = records.filter(r => r.buyer && r.buyer.includes('融爱'));
-  const rongAiTotal = rongAi.reduce((s, r) => s + (r.amount ? parseFloat(r.amount) : 0), 0);
-  s3.addRow(['融爱(个体工商户)', rongAiTotal]);
   s3.getColumn(2).numFmt = '#,##0.00';
-
-  const huiFu = records.filter(r => r.buyer && r.buyer.includes('惠浮德锦'));
-  const huiFuTotal = huiFu.reduce((s, r) => s + (r.amount ? parseFloat(r.amount) : 0), 0);
-  s3.addRow(['惠浮德锦', huiFuTotal]);
 
   const personal = records.filter(r => r.buyer === '个人报销');
   const personalTotal = personal.reduce((s, r) => s + (r.amount ? parseFloat(r.amount) : 0), 0);
-  s3.addRow(['个人报销', personalTotal]);
+  if (personal.length) s3.addRow(['个人报销', personalTotal]);
+
+  const buyerTotals = Object.entries(byBuyer)
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 5);
+  for (const [buyer, stats] of buyerTotals) {
+    s3.addRow([buyer, stats.total]);
+  }
 
   const allTotal = records.reduce((s, r) => s + (r.amount ? parseFloat(r.amount) : 0), 0);
   s3.addRow(['合计（含未识别购买方）', allTotal]);
@@ -270,9 +270,10 @@ async function generateLedger() {
   console.log('Sheet4 人工任务: ' + manualRecords.length + ' 条');
   console.log('');
   console.log('━━━ 关键金额 ━━━');
-  console.log('融爱(个体工商户): ' + rongAi.length + '张, ¥' + rongAiTotal.toFixed(2));
-  console.log('惠浮德锦: ' + huiFu.length + '张, ¥' + huiFuTotal.toFixed(2));
-  console.log('个人报销: ' + personal.length + '张, ¥' + personalTotal.toFixed(2));
+  for (const [buyer, stats] of buyerTotals) {
+    console.log(buyer + ': ' + stats.count + '张, ¥' + stats.total.toFixed(2));
+  }
+  if (personal.length) console.log('个人报销: ' + personal.length + '张, ¥' + personalTotal.toFixed(2));
   console.log('合计: ¥' + allTotal.toFixed(2));
 }
 

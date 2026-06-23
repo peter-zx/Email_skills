@@ -371,7 +371,7 @@ async function main() {
     if (email.status !== 'error') return atts;
     // 回退：根据 subject 推断
     const subj = email.subject || '';
-    if (subj.includes('拼多多')) return [{ filename: '拼多多商家电子发票.pdf', contentType: 'application/pdf', size: 0, type: 'pdf' }];
+    if (subj.includes('电子发票')) return [{ filename: '电子发票.pdf', contentType: 'application/pdf', size: 0, type: 'pdf' }];
     return atts;
   }
 

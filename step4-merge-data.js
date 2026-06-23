@@ -47,10 +47,6 @@ function cleanCompanyName(name) {
   if (/^\d{4}_/.test(n)) n = n.replace(/^\d{4}_/, '');
   // 归一化
   n = config.BUYER_NORMALIZE[n] || n;
-  if (n.includes('武汉市硚口区融爱日用品经营部')) n = '武汉市硚口区融爱日用品经营部（个体工商户）';
-  if (n.includes('武汉惠浮德锦')) n = '武汉惠浮德锦人力资源服务有限公司';
-  if (n.includes('武汉市江岸区厚德济困服务中心')) n = '武汉市江岸区厚德济困服务中心';
-  if (n.includes('竹相创意')) n = '竹相创意（武汉）文化科技有限公司';
   if (n.length < 4) return null;
   if (/^\d+$/.test(n)) return null;
   return n;
@@ -351,8 +347,8 @@ async function mergeData() {
       if (acc) {
         r.amount = (parseFloat(acc[1]) / 1000).toFixed(2);
         r.amountSource = 'filename-ACC';
-        r.buyer = '武汉市硚口区融爱日用品经营部（个体工商户）';
-        r.seller = '武汉英格卡购物中心有限公司';
+        r.buyer = r.buyer || inferBuyerFromSeller(r.seller, r.docType) || config.DOCTYPE_DEFAULT_BUYER[r.docType] || null;
+        r.seller = r.seller || extractSellerFromSubject(r.subject);
         r.needsManualReview = false;
         r.manualReason = null;
       }
@@ -360,7 +356,6 @@ async function mergeData() {
 
     // buyer=seller 互换
     if (r.buyer && r.seller && r.buyer === r.seller &&
-        r.buyer !== '武汉市硚口区融爱日用品经营部（个体工商户）' &&
         r.buyer !== '个人报销') {
       // 尝试从销售方推断真实购买方
       const inferredBuyer = inferBuyerFromSeller(r.seller, r.docType);

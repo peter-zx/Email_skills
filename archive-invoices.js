@@ -6,24 +6,11 @@ const ROOT = __dirname;
 const SCAN_DIR = path.join(ROOT, 'scan-results');
 const DOWNLOAD_DIR = path.join(SCAN_DIR, 'downloads');
 const ARCHIVE_DIR = path.join(ROOT, 'archive');
+const ALL_PDF_DIR = path.join(ARCHIVE_DIR, '本轮全部PDF');
 const dateTag = process.argv[2] || '';
-
-const BUYER_KEYWORDS = [
-  ['武汉市硚口区融爱日用品经营部', '融爱'],
-  ['融爱', '融爱'],
-  ['武汉惠浮德锦人力资源服务有限公司', '惠浮德锦'],
-  ['惠浮德锦', '惠浮德锦'],
-  ['武汉市江岸区厚德济困服务中心', '厚德济困'],
-  ['厚德济困', '厚德济困'],
-  ['个人报销', '个人报销'],
-];
 
 function normalizeBuyerName(value) {
   const text = String(value || '').trim();
-  if (text.includes('武汉市硚口区融爱日用品经营部')) return '武汉市硚口区融爱日用品经营部（个体工商户）';
-  if (text.includes('武汉惠浮德锦')) return '武汉惠浮德锦人力资源服务有限公司';
-  if (text.includes('武汉市江岸区厚德济困服务中心')) return '武汉市江岸区厚德济困服务中心';
-  if (text.includes('竹相创意')) return '竹相创意（武汉）文化科技有限公司';
   return text;
 }
 
@@ -65,10 +52,11 @@ function monthTag(record) {
 
 function buyerKeyword(buyer) {
   const text = String(buyer || '');
-  for (const [needle, label] of BUYER_KEYWORDS) {
-    if (text.includes(needle)) return label;
-  }
-  return text ? safe(text.slice(0, 8), '未知') : '未知';
+  if (!text) return '未知';
+  const cleaned = text
+    .replace(/（个体工商户）|\(个体工商户\)|有限责任公司|股份有限公司|有限公司|公司|经营部|服务中心/g, '')
+    .trim();
+  return safe((cleaned || text).slice(0, 8), '未知');
 }
 
 function docType(record, item) {
@@ -91,6 +79,27 @@ function uniquePath(file) {
   let index = 2;
   while (fs.existsSync(`${base}-${index}${ext}`)) index++;
   return `${base}-${index}${ext}`;
+}
+
+function resetDir(dir) {
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function linkFlatPdf(record) {
+  if (!record.targetPath || !fs.existsSync(record.targetPath)) return null;
+  const flatName = safe(`${record.month}_${record.buyer}_${record.seller}_${record.amount}_${record.suffix}`, `uid${record.uid}`) + '.pdf';
+  const flatPath = uniquePath(path.join(ALL_PDF_DIR, flatName));
+  try {
+    fs.linkSync(record.targetPath, flatPath);
+    return flatPath;
+  } catch (_) {
+    // 兜底：如果硬链接失败，创建 Windows/浏览器都能识别的 URL 指针，不复制 PDF 数据。
+    const pointerPath = flatPath.replace(/\.pdf$/i, '.url');
+    const targetUrl = 'file:///' + record.targetPath.replace(/\\/g, '/');
+    fs.writeFileSync(pointerPath, `[InternetShortcut]\nURL=${targetUrl}\n`, 'utf8');
+    return pointerPath;
+  }
 }
 
 function qqMailLink(record) {
@@ -224,6 +233,7 @@ function main() {
   const downloadData = JSON.parse(fs.readFileSync(downloadFile, 'utf8'));
   const byUid = new Map((finalData.data || []).map(r => [String(r.emailUid), r]));
   fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+  resetDir(ALL_PDF_DIR);
 
   const records = [];
   const anomalies = [];
@@ -260,6 +270,7 @@ function main() {
     if (item.type === 'image') {
       anomalies.push({ ...row, status: 'png_anomaly', advice: 'PNG 图片发票，需 OCR 或人工扫码识别金额' });
     } else {
+      row.flatPath = linkFlatPdf(row);
       records.push(row);
     }
   }
@@ -284,9 +295,15 @@ function main() {
     sourceFinalFile: path.relative(ROOT, finalFile),
     sourceDownloadFile: path.relative(ROOT, downloadFile),
     rule: 'archive/{buyer}/{seller}/{amount}_{buyerKeyword}_{invoiceNoLast6}_{type}_{month}.{ext}; PNG => archive/待处理/美团/',
+    flatPdfDir: path.relative(ROOT, ALL_PDF_DIR),
     archived: records.length,
     anomalies: anomalies.length,
-    records: records.map(r => ({ ...r, sourcePath: path.relative(ROOT, r.sourcePath), targetPath: path.relative(ROOT, r.targetPath) })),
+    records: records.map(r => ({
+      ...r,
+      sourcePath: path.relative(ROOT, r.sourcePath),
+      targetPath: path.relative(ROOT, r.targetPath),
+      flatPath: r.flatPath ? path.relative(ROOT, r.flatPath) : null,
+    })),
     anomalyRecords: anomalies.map(r => ({ ...r, sourcePath: r.sourcePath ? path.relative(ROOT, r.sourcePath) : null, targetPath: r.targetPath ? path.relative(ROOT, r.targetPath) : null })),
   };
   fs.writeFileSync(path.join(ARCHIVE_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
@@ -294,6 +311,7 @@ function main() {
   console.log(`Archived files: ${records.length}`);
   console.log(`Anomalies: ${anomalies.length}`);
   console.log(`Archive: ${ARCHIVE_DIR}`);
+  console.log(`Flat PDFs: ${ALL_PDF_DIR}`);
   console.log(`Summary: ${path.join(ARCHIVE_DIR, 'index.html')}`);
 }
 

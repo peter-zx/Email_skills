@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const PDFParser = require('pdf2json');
+const config = require('./config/BUYER_MAP');
 
 const args = process.argv.slice(2);
 const dateTag = args[0] || '';
@@ -163,12 +164,13 @@ function extractInvoiceInfo(text, filename) {
     return trip;
   }
 
-  // ---- 付款通知书（英格卡） ----
-  if (t.includes('付款通知书') && t.includes('英格卡') || t.includes('滞纳金付款通知书')) {
+  // ---- 付款通知书 / 滞纳金通知书 ----
+  if (t.includes('付款通知书') || t.includes('滞纳金付款通知书')) {
+    const companies = companyMatches(t.replace(/\s+/g, ' '));
     const notice = {
       docType: t.includes('滞纳金') ? '滞纳金付款通知书' : '付款通知书',
-      buyer: '武汉市硚口区融爱日用品经营部（个体工商户）',
-      seller: '武汉英格卡购物中心有限公司',
+      buyer: config.DOCTYPE_DEFAULT_BUYER['付款通知书'] || null,
+      seller: companies[0] || null,
       amount: null, date: null, invoiceNo: null, taxAmount: null,
     };
     // 金额：付款通知书金额 或 滞纳金金额
