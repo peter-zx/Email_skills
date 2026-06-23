@@ -44,12 +44,27 @@ function cleanCompanyName(name) {
   if (n.includes('开票申请处理成功通知')) return null;
   if (n.includes('发票认证通知')) return null;
   if (n.includes('检测到新登录')) return null;
+  const noise = [
+    '订单', '您的', '客户', '商品', '项目名称', '规格型号', '电子发票',
+    '普通发票', '专用发票', '发票号码', '开票日期', '价税合计',
+    '合计', '税额', '金额', '纳税人识别号', '统一社会信用代码',
+  ];
+  if (noise.some(word => n.includes(word))) return null;
   if (/^\d{4}_/.test(n)) n = n.replace(/^\d{4}_/, '');
   // 归一化
   n = config.BUYER_NORMALIZE[n] || n;
   if (n.length < 4) return null;
   if (/^\d+$/.test(n)) return null;
   return n;
+}
+
+function isUsablePartyName(value) {
+  const text = cleanCompanyName(value);
+  if (!text) return null;
+  if (['个人报销', '中国铁路12306'].includes(text)) return text;
+  return /(?:有限公司|有限责任公司|股份有限公司|经营部|商行|网店|服务中心|个体工商户[）)]?|公司|企业|中心)$/.test(text)
+    ? text
+    : null;
 }
 
 function extractAmountFromSubject(subject) {
@@ -273,12 +288,18 @@ async function mergeData() {
       }
 
       // 购买方/销售方
-      if (pdfRecord.buyer) {
-        record.buyer = cleanCompanyName(pdfRecord.buyer) || record.buyer;
+      const pdfBuyer = isUsablePartyName(pdfRecord.buyer);
+      const pdfSeller = isUsablePartyName(pdfRecord.seller);
+      if (pdfBuyer && !pdfSeller && record.buyer && record.buyer !== pdfBuyer && !record.seller) {
+        record.seller = pdfBuyer;
+        record.sellerSource = 'pdf-single-company';
+        record.notes = [record.notes, 'PDF仅识别到一个有效公司名，按销售方处理'].filter(Boolean).join('; ');
+      } else if (pdfBuyer) {
+        record.buyer = pdfBuyer;
         record.buyerSource = 'pdf';
       }
-      if (pdfRecord.seller) {
-        record.seller = cleanCompanyName(pdfRecord.seller) || record.seller;
+      if (pdfSeller) {
+        record.seller = pdfSeller;
         record.sellerSource = 'pdf';
       }
     }
@@ -301,7 +322,7 @@ async function mergeData() {
     }
 
     // ===== F. 判断是否需要人工 =====
-    const needsManual = !record.amount || (!record.buyer && !record.seller);
+    const needsManual = !record.amount || !record.buyer || !record.seller;
     if ((email.status === 'needs-manual' || email.status === 'pending-link') && !record.hasPdf) {
       record.needsManualReview = true;
       record.manualReason = email.status === 'needs-manual'
@@ -323,7 +344,7 @@ async function mergeData() {
       });
     } else if (needsManual) {
       record.needsManualReview = true;
-      record.manualReason = !record.amount ? 'NO_AMOUNT' : 'NO_BUYER';
+      record.manualReason = !record.amount ? 'NO_AMOUNT' : (!record.buyer ? 'NO_BUYER' : 'NO_SELLER');
       manualTasks.push({
         uid: email.uid,
         hyperlink: record.emailHyperlink,

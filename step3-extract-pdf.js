@@ -20,6 +20,7 @@ const config = require('./config/BUYER_MAP');
 
 const args = process.argv.slice(2);
 const dateTag = args[0] || '';
+const EXTRACTOR_VERSION = '2026-06-23-party-validation-v2';
 
 // ===== 找到最新的下载结果 =====
 function findLatestDownload() {
@@ -67,11 +68,21 @@ function normalizeInvoiceDate(value) {
 
 function companyMatches(text) {
   const matches = text.match(/[\u4e00-\u9fa5（）()A-Za-z0-9·]{4,60}(?:有限公司|有限责任公司|股份有限公司|经营部|商行|网店|服务中心|个体工商户)/g) || [];
-  return [...new Set(matches.map(s => s.trim()).filter(s =>
-    !s.includes('项目名称') &&
-    !s.includes('电子发票') &&
-    !s.includes('规格型号')
-  ))];
+  return [...new Set(matches.map(s => cleanCompanyName(s)).filter(Boolean))];
+}
+
+function looksLikeCompanyName(value) {
+  const text = String(value || '').trim();
+  if (!text || text.length < 4) return false;
+  if (['个人报销', '中国铁路12306'].includes(text)) return true;
+  if (/^\d+$/.test(text)) return false;
+  const noise = [
+    '订单', '您的', '客户', '商品', '项目名称', '规格型号', '电子发票',
+    '普通发票', '专用发票', '发票号码', '开票日期', '价税合计',
+    '合计', '税额', '金额', '名称', '纳税人识别号', '统一社会信用代码',
+  ];
+  if (noise.some(word => text.includes(word))) return false;
+  return /(?:有限公司|有限责任公司|股份有限公司|经营部|商行|网店|服务中心|个体工商户[）)]?|公司|企业|中心)$/.test(text);
 }
 
 function assignPartiesByLabels(info, compact, companies) {
@@ -128,7 +139,7 @@ function extractDigitalInvoice(t, filename) {
 
   const companies = companyMatches(compact);
   assignPartiesByLabels(info, compact, companies);
-  if (companies.length === 1) info.buyer = info.buyer || companies[0];
+  if (companies.length === 1) info.seller = info.seller || companies[0];
   info._extracted = '数电发票';
   return info;
 }
@@ -224,11 +235,11 @@ function extractSpacedDigital(t, filename) {
   // 购买方名称（已从raw移除空格，直接匹配）
   // 处理连续两个"名称："的情况：header行有"名称：名称："，值行才有实际数据
   const buyerMatch = raw.match(/购买方.*?名称[：:]*(?:名称[：:]*)?([\u4e00-\u9fa5A-Za-z0-9（）()公司企业店所部]{2,40})(?:\d{15,}|统一|名称|项目|规格)/);
-  if (buyerMatch) info.buyer = buyerMatch[1].trim();
+  if (buyerMatch && looksLikeCompanyName(buyerMatch[1])) info.buyer = buyerMatch[1].trim();
 
   // 销售方名称
   const sellerMatch = raw.match(/销售方.*?名称[：:]*(?:名称[：:]*)?([\u4e00-\u9fa5A-Za-z0-9（）()公司企业店所部]{2,40})(?:\d{15,}|统一|名称|项目|规格)/);
-  if (sellerMatch) info.seller = sellerMatch[1].trim();
+  if (sellerMatch && looksLikeCompanyName(sellerMatch[1])) info.seller = sellerMatch[1].trim();
 
   // 如果空格格式找不到，尝试按“购买方信息/销售方信息”的标签顺序判断。
   // 有些数电票 PDF 抽取出来是“销售方信息 购买方信息 ... 销售方名称 购买方名称”，
@@ -239,7 +250,7 @@ function extractSpacedDigital(t, filename) {
     if (unique.length >= 2) {
       assignPartiesByLabels(info, raw, unique);
     } else if (unique.length === 1) {
-      if (!info.buyer) info.buyer = unique[0];
+      if (!info.seller) info.seller = unique[0];
     }
   }
 
@@ -275,11 +286,11 @@ function extractNormalPDF(t, filename) {
 
   // 购买方
   const buyerMatch = t.match(/购买方[信息]?[：:]\s*([一-龥A-Za-z0-9（）\(\)公司企业店所部]{2,40})/);
-  if (buyerMatch) info.buyer = buyerMatch[1].trim();
+  if (buyerMatch && looksLikeCompanyName(buyerMatch[1])) info.buyer = buyerMatch[1].trim();
 
   // 销售方
   const sellerMatch = t.match(/销售方[信息]?[：:]\s*([一-龥A-Za-z0-9（）\(\)公司企业店所部]{2,40})/);
-  if (sellerMatch) info.seller = sellerMatch[1].trim();
+  if (sellerMatch && looksLikeCompanyName(sellerMatch[1])) info.seller = sellerMatch[1].trim();
 
   // 发票号
   const noMatch = t.match(/(?:发票号|发票号码)[：:\s]*([0-9]{20,})/);
@@ -309,6 +320,7 @@ function cleanCompanyName(name) {
   // 统一括号
   n = n.replace(/\(个体工商户\)/g, '（个体工商户）');
   n = n.replace(/（个体工商户(?![）])/g, '（个体工商户）');
+  if (!looksLikeCompanyName(n)) return null;
   // 移除过短的结果
   if (n.length < 4) return null;
   // 移除全是数字的
@@ -320,6 +332,7 @@ function saveExtractionResults(outputFile, dateTagFromDl, results) {
   const output = {
     meta: {
       dateTag: dateTagFromDl,
+      extractorVersion: EXTRACTOR_VERSION,
       total: results.length,
       success: results.filter(r => !r.error).length,
       fail: results.filter(r => r.error).length,
@@ -344,7 +357,11 @@ async function extractPdfs() {
 
   let results = [];
   if (fs.existsSync(outputFile)) {
-    results = JSON.parse(fs.readFileSync(outputFile, 'utf8')).results || [];
+    const cached = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+    results = cached.meta?.extractorVersion === EXTRACTOR_VERSION ? (cached.results || []) : [];
+    if (cached.meta?.extractorVersion && cached.meta.extractorVersion !== EXTRACTOR_VERSION) {
+      console.log('检测到 PDF 提取规则已升级，重新提取当前 PDF。');
+    }
   }
 
   const currentPdfPaths = new Set(pdfFiles.map(f => path.resolve(f.filepath)));
